@@ -58,40 +58,45 @@ async function main() {
     console.log(`✅ Created user: ${userId}`)
   }
 
-  // 2. Create business
+  // 2. Create business — check if exists first, then insert or update
   console.log('\n🏢 Creating Pinnacles Resource Centre Farm...')
-  const { data: business, error: bizErr } = await supabase
-    .from('businesses')
-    .upsert({
-      owner_id: userId,
-      name: 'Pinnacles Resource Centre Farm',
-      description: 'Fresh farm produce direct from Offa, Kwara State, Nigeria. We grow and supply high-quality vegetables, fruits and farm products.',
-      website: 'https://farm.pinnaclescentre.ng',
-      phone: '09037505632',
-      phone2: '07078210834',
-      email: 'info@pinnaclescentre.ng',
-      address: 'Pinnacles Resource Centre',
-      city: 'Offa',
-      state: 'Kwara State',
-      country: 'Nigeria',
-      currency: 'NGN',
-      currency_symbol: '₦',
-      brand_voice: 'Warm, community-focused, trustworthy, and proud of fresh local produce',
-      target_audience: 'Households, restaurants, food vendors, and supermarkets in Offa and surrounding areas in Kwara State',
-      opening_hours: {
-        Monday: '7:00 AM – 6:00 PM', Tuesday: '7:00 AM – 6:00 PM',
-        Wednesday: '7:00 AM – 6:00 PM', Thursday: '7:00 AM – 6:00 PM',
-        Friday: '7:00 AM – 6:00 PM', Saturday: '7:00 AM – 4:00 PM', Sunday: 'Closed',
-      },
-    }, { onConflict: 'owner_id' })
-    .select('id').single()
 
-  if (bizErr) {
-    console.error('❌ Business error:', bizErr.message)
-    process.exit(1)
+  const businessData = {
+    owner_id: userId,
+    name: 'Pinnacles Resource Centre Farm',
+    description: 'Fresh farm produce direct from Offa, Kwara State, Nigeria. We grow and supply high-quality vegetables, fruits and farm products.',
+    website: 'https://farm.pinnaclescentre.ng',
+    phone: '09037505632',
+    phone2: '07078210834',
+    email: 'info@pinnaclescentre.ng',
+    address: 'Pinnacles Resource Centre',
+    city: 'Offa',
+    state: 'Kwara State',
+    country: 'Nigeria',
+    currency: 'NGN',
+    currency_symbol: '₦',
+    brand_voice: 'Warm, community-focused, trustworthy, and proud of fresh local produce',
+    target_audience: 'Households, restaurants, food vendors, and supermarkets in Offa and surrounding areas in Kwara State',
+    opening_hours: {
+      Monday: '7:00 AM – 6:00 PM', Tuesday: '7:00 AM – 6:00 PM',
+      Wednesday: '7:00 AM – 6:00 PM', Thursday: '7:00 AM – 6:00 PM',
+      Friday: '7:00 AM – 6:00 PM', Saturday: '7:00 AM – 4:00 PM', Sunday: 'Closed',
+    },
   }
-  const businessId = business.id
-  console.log(`✅ Business ID: ${businessId}`)
+
+  let businessId
+  const { data: existingBiz } = await supabase.from('businesses').select('id').eq('owner_id', userId).single()
+
+  if (existingBiz) {
+    businessId = existingBiz.id
+    await supabase.from('businesses').update(businessData).eq('id', businessId)
+    console.log(`✅ Business updated: ${businessId}`)
+  } else {
+    const { data: newBiz, error: bizErr } = await supabase.from('businesses').insert(businessData).select('id').single()
+    if (bizErr) { console.error('❌ Business error:', bizErr.message); process.exit(1) }
+    businessId = newBiz.id
+    console.log(`✅ Business created: ${businessId}`)
+  }
 
   // 3. Products
   const products = [
@@ -106,16 +111,20 @@ async function main() {
 
   console.log('\n🛒 Adding products...')
   for (const prod of products) {
-    const { data: p, error } = await supabase.from('products').upsert(
-      { business_id: businessId, currency: 'NGN', is_active: true, ...prod },
-      { onConflict: 'business_id,name' }
-    ).select('id').single()
-
-    if (error) { console.warn(`  ⚠️  ${prod.name}: ${error.message}`); continue }
-    await supabase.from('product_inventory').upsert(
-      { product_id: p.id, quantity: 100, availability_status: 'available' },
-      { onConflict: 'product_id' }
-    )
+    // Check if product already exists
+    const { data: existing } = await supabase.from('products').select('id').eq('business_id', businessId).eq('name', prod.name).single()
+    let productId
+    if (existing) {
+      productId = existing.id
+      await supabase.from('products').update({ currency: 'NGN', is_active: true, ...prod }).eq('id', productId)
+    } else {
+      const { data: np, error } = await supabase.from('products').insert({ business_id: businessId, currency: 'NGN', is_active: true, ...prod }).select('id').single()
+      if (error) { console.warn(`  ⚠️  ${prod.name}: ${error.message}`); continue }
+      productId = np.id
+    }
+    // Inventory
+    const { data: inv } = await supabase.from('product_inventory').select('id').eq('product_id', productId).single()
+    if (!inv) await supabase.from('product_inventory').insert({ product_id: productId, quantity: 100, availability_status: 'available' })
     console.log(`  ✅ ${prod.name} — ₦${prod.price.toLocaleString()}/${prod.unit}`)
   }
 
@@ -135,27 +144,41 @@ async function main() {
 
   console.log('\n💬 Adding FAQs...')
   for (const faq of faqs) {
-    const { error } = await supabase.from('faqs').upsert(
-      { business_id: businessId, is_active: true, ...faq },
-      { onConflict: 'business_id,question' }
-    )
-    if (error) console.warn(`  ⚠️  FAQ: ${error.message}`)
-    else console.log(`  ✅ ${faq.question.slice(0, 50)}`)
+    const { data: ef } = await supabase.from('faqs').select('id').eq('business_id', businessId).eq('question', faq.question).single()
+    if (ef) {
+      await supabase.from('faqs').update({ ...faq, is_active: true }).eq('id', ef.id)
+    } else {
+      const { error } = await supabase.from('faqs').insert({ business_id: businessId, is_active: true, ...faq })
+      if (error) { console.warn(`  ⚠️  FAQ: ${error.message}`); continue }
+    }
+    console.log(`  ✅ ${faq.question.slice(0, 50)}`)
   }
 
   // 5. Knowledge document
   console.log('\n📄 Adding knowledge document...')
-  await supabase.from('knowledge_documents').upsert({
-    business_id: businessId,
-    title: 'About Pinnacles Resource Centre Farm',
-    document_type: 'text',
-    content: `Pinnacles Resource Centre Farm is located in Offa, Kwara State, Nigeria.\n\nProducts: Maize (₦15,000/bag), Carrots (₦800/kg), Eggs (₦4,500/crate), Green Peas (₦1,200/kg), Tomatoes (₦8,000/basket), Bell Peppers (₦1,500/kg), Garden Cucumbers (₦700/kg)\n\nContact: 09037505632 / 07078210834\nWebsite: farm.pinnaclescentre.ng\nAddress: Pinnacles Resource Centre, Offa, Kwara State, Nigeria\n\nOpening hours: Mon–Fri 7AM–6PM, Sat 7AM–4PM, Sun Closed`,
-  }, { onConflict: 'business_id,title' })
+  const { data: ed } = await supabase.from('knowledge_documents').select('id').eq('business_id', businessId).eq('title', 'About Pinnacles Resource Centre Farm').single()
+  if (!ed) {
+    await supabase.from('knowledge_documents').insert({
+      business_id: businessId,
+      title: 'About Pinnacles Resource Centre Farm',
+      document_type: 'text',
+      content: `Pinnacles Resource Centre Farm is located in Offa, Kwara State, Nigeria.\n\nProducts: Maize (₦15,000/bag), Carrots (₦800/kg), Eggs (₦4,500/crate), Green Peas (₦1,200/kg), Tomatoes (₦8,000/basket), Bell Peppers (₦1,500/kg), Garden Cucumbers (₦700/kg)\n\nContact: 09037505632 / 07078210834\nWebsite: farm.pinnaclescentre.ng\nAddress: Pinnacles Resource Centre, Offa, Kwara State, Nigeria\n\nOpening hours: Mon–Fri 7AM–6PM, Sat 7AM–4PM, Sun Closed`,
+    })
+  }
   console.log('  ✅ Knowledge document added')
 
-  // 6. AI permissions
+  // 6. Business member record (so RLS allows access)
+  console.log('\n👥 Setting up business membership...')
+  const { data: em } = await supabase.from('business_members').select('id').eq('business_id', businessId).eq('user_id', userId).single()
+  if (!em) {
+    await supabase.from('business_members').insert({ business_id: businessId, user_id: userId, role: 'owner' })
+  }
+  console.log('  ✅ Owner membership set')
+
+  // 7. AI permissions
   console.log('\n🔐 Setting AI permissions...')
-  await supabase.from('ai_permissions').upsert({
+  const { data: ep } = await supabase.from('ai_permissions').select('id').eq('business_id', businessId).single()
+  const permData = {
     business_id: businessId,
     autopilot_enabled: false,
     approval_mode: 'approval',
@@ -168,7 +191,12 @@ async function main() {
       orders: { create_drafts: true, confirm_orders: false },
       business: { modify_products: false, modify_prices: false },
     },
-  }, { onConflict: 'business_id' })
+  }
+  if (ep) {
+    await supabase.from('ai_permissions').update(permData).eq('id', ep.id)
+  } else {
+    await supabase.from('ai_permissions').insert(permData)
+  }
   console.log('  ✅ AI permissions configured (safe defaults)')
 
   console.log('\n' + '='.repeat(60))
