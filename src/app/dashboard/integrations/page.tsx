@@ -13,7 +13,7 @@ const PLATFORMS = [
     icon: '📘',
     description: 'Connect your Facebook Page to publish posts and view analytics',
     features: ['Publish posts', 'View page analytics', 'Schedule content'],
-    oauthPath: '/api/integrations/facebook/connect',
+    oauthPath: '/dashboard/integrations/facebook-setup',
     docsPath: 'https://developers.facebook.com/docs/',
   },
   {
@@ -22,7 +22,7 @@ const PLATFORMS = [
     icon: '📷',
     description: 'Connect your Instagram Business account for publishing and analytics',
     features: ['Publish photos/videos', 'Instagram Insights', 'Schedule content'],
-    oauthPath: '/api/integrations/instagram/connect',
+    oauthPath: '/dashboard/integrations/facebook-setup',
     docsPath: 'https://developers.facebook.com/docs/instagram-api/',
   },
   {
