@@ -1,5 +1,10 @@
 # Dependencies
 node_modules/
+
+# Next.js auto-generated AI agent files (do not commit)
+AGENTS.md
+CLAUDE.md
+
 .pnp
 .pnp.js
 
